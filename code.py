@@ -1,51 +1,115 @@
+import streamlit as st
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-# Load the dataset
-data = pd.read_csv("C:/Certiport/adult 3.csv")
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# Display the first few rows
-data.head()
-# Replace '?' with NaN and drop missing values
-data.replace(' ?', pd.NA, inplace=True)
-data.dropna(inplace=True)
+# Title
+st.title("🏢 Employee Salary Prediction Dashboard")
 
-# Separate features and target
-X = data.drop('income', axis=1)
-y = data['income']
+# Load dataset
+@st.cache_data
+def load_data(path):
+    return pd.read_csv(path)
 
-# Encode categorical features
-label_encoders = {}
-for col in X.select_dtypes(include=['object']).columns:
+uploaded_file = st.file_uploader("Upload Employee_Salary.csv file", type=["csv"])
+if uploaded_file is not None:
+    df = load_data(uploaded_file)
+
+    st.subheader("📊 Original Dataset")
+    st.dataframe(df)
+    st.text(df.info())
+
+    # Data Insights
+    st.subheader("🔍 Missing Values")
+    st.write(df.isna().sum())
+
+    st.subheader("📌 Job Title Distribution")
+    st.bar_chart(df['Job_Title'].value_counts())
+
+    st.subheader("🏢 Department Distribution")
+    st.bar_chart(df['Department'].value_counts())
+
+    st.subheader("🎓 Education Level Distribution")
+    st.bar_chart(df['Education_Level'].value_counts())
+
+    # Drop unnecessary columns
+    df.drop(['Hire_Date', 'Employee_ID'], inplace=True, axis=1)
+
+    # Boxplots
+    st.subheader("📦 Boxplot - Monthly Salary")
+    fig, ax = plt.subplots()
+    sns.boxplot(x=df['Monthly_Salary'], ax=ax)
+    st.pyplot(fig)
+
+    st.subheader("📦 Boxplot - Age")
+    fig2, ax2 = plt.subplots()
+    sns.boxplot(x=df['Age'], ax=ax2)
+    st.pyplot(fig2)
+
+    # Encode categorical columns
     le = LabelEncoder()
-    X[col] = le.fit_transform(X[col])
-    label_encoders[col] = le
+    df['Gender'] = le.fit_transform(df['Gender'])
+    df['Education_Level'] = le.fit_transform(df['Education_Level'])
 
-# Encode target variable
-target_encoder = LabelEncoder()
-y = target_encoder.fit_transform(y)  # <=50K -> 0, >50K -> 1
+    dummies_job = pd.get_dummies(df['Job_Title'], prefix='JobTitle').astype(int)
+    dummies_dept = pd.get_dummies(df['Department'], prefix='Department').astype(int)
 
-# Standardize the features
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-# Split into train and test sets
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, random_state=42
-)
-# Initialize and train the Logistic Regression model
-lr = LogisticRegression(max_iter=1000)
-lr.fit(X_train, y_train)
-# Predict on test data
-y_pred = lr.predict(X_test)
+    df.drop(['Job_Title', 'Department'], axis=1, inplace=True)
+    df_encoded = pd.concat([df, dummies_job, dummies_dept], axis=1)
 
-# Accuracy and metrics
-accuracy = accuracy_score(y_test, y_pred)
-conf_matrix = confusion_matrix(y_test, y_pred)
-report = classification_report(y_test, y_pred, target_names=target_encoder.classes_)
+    st.subheader("🔠 Encoded Dataset")
+    st.dataframe(df_encoded)
 
-print("Accuracy:", accuracy)
-print("\nConfusion Matrix:\n", conf_matrix)
-print("\nClassification Report:\n", report)
+    # Scaling
+    scaler = MinMaxScaler()
+    scaled_cols = ['Age', 'Work_Hours_Per_Week', 'Years_At_Company', 'Education_Level',
+                   'Performance_Score', 'Projects_Handled', 'Overtime_Hours', 'Sick_Days',
+                   'Remote_Work_Frequency', 'Team_Size', 'Training_Hours', 'Promotions',
+                   'Employee_Satisfaction_Score', 'Resigned']
 
+    df_scaled = df_encoded.copy()
+    df_scaled[scaled_cols] = scaler.fit_transform(df_scaled[scaled_cols])
+
+    st.subheader("📐 Scaled Dataset")
+    st.dataframe(df_scaled)
+
+    # Train Model
+    X = df_scaled.drop(columns=['Monthly_Salary'])
+    y = df_scaled['Monthly_Salary']
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    rf_model = RandomForestRegressor(random_state=42)
+    rf_model.fit(X_train, y_train)
+    y_pred = rf_model.predict(X_test)
+
+    # Evaluation
+    st.subheader("📈 Random Forest Evaluation Metrics")
+
+    def evaluate_model(y_true, y_pred):
+        mae = mean_absolute_error(y_true, y_pred)
+        mse = mean_squared_error(y_true, y_pred)
+        rmse = np.sqrt(mse)
+        r2 = r2_score(y_true, y_pred)
+        return mae, mse, rmse, r2
+
+    mae, mse, rmse, r2 = evaluate_model(y_test, y_pred)
+
+    st.write(f"*Mean Absolute Error (MAE):* {mae:.4f}")
+    st.write(f"*Mean Squared Error (MSE):* {mse:.4f}")
+    st.write(f"*Root Mean Squared Error (RMSE):* {rmse:.4f}")
+    st.write(f"*R2 Score:* {r2:.4f}")
+
+    # Predictions table
+    st.subheader("🧾 Sample Predictions")
+    predictions_df = pd.DataFrame({'Actual': y_test[:10].values, 'Predicted': y_pred[:10]})
+    st.dataframe(predictions_df)
+
+else:
+    st.warning("📁 Please upload the Employee_Salary.csv file to begin.")
